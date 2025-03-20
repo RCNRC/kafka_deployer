@@ -6,29 +6,31 @@ Python application for automated Apache Kafka cluster deployment using Ansible.
 
 ```
 /src
-├── core/          # Core logic (Ansible integration, config management)
-├── cli/           # Command-line interface (Click)
-├── api/           # REST API endpoints (FastAPI) - TODO
-└── gui/           # GUI components (PyQt/Gradio) - TODO
+├── core/               # Core logic (Ansible integration, configuration management)
+│   ├── __init__.py
+│   ├── ansible_wrapper.py
+│   └── config_manager.py
+├── cli/                # Command-line interface (Click)
+│   ├── __init__.py
+│   └── cli.py
+/configs                # Cluster configuration templates
+/docs                   # Documentation
+/tests                  # Unit and integration tests
 
-/configs           # Cluster configuration templates
-/docs             # Documentation and guides
-/tests            # Unit and integration tests
 ```
 
 ## Quick Start
 
-1. Clone repository:
-```bash
-git clone https://github.com/your/repo.git
-cd kafka_deployer
-```
-
-2. Install dependencies (requires Python 3.10+):
+1. Install dependencies (Python 3.10+ required):
 ```bash
 python -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
+```
+
+2. Test installation:
+```bash
+python -m src.cli.cli --help
 ```
 
 3. Deploy test cluster:
@@ -40,7 +42,4 @@ python -m src.cli.cli deploy --config configs/kafka_template.yaml
 ```bash
 # Run tests
 pytest tests/
-
-# Generate documentation
-mkdocs serve
 ```
