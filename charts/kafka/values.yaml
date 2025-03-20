@@ -1,7 +1,9 @@
-autoscaling:
-  enabled: true
-  minReplicas: 3
-  maxReplicas: 10
-  targetCPU: 80
-  targetThroughput: 1000000
+monitoring:
+  enabled: false
+  serviceMonitor:
+    enabled: true
+  grafana:
+    enabled: true
+  prometheus:
+    scrapeInterval: 15s
 

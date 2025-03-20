@@ -1,24 +1,41 @@
 ---
-- name: Install monitoring stack
+- name: Deploy monitoring stack
   hosts: kafka_cluster
+  vars:
+    prometheus_version: "2.47.0"
+    grafana_version: "9.5.6"
+    kafka_exporter_version: "1.7.0"
+    
   tasks:
-    - name: Install Prometheus
-      apt: 
+    - name: Install Prometheus Operator
+      helm:
         name: prometheus
-        state: present
+        chart_name: prometheus-community/kube-prometheus-stack
+        namespace: monitoring
+        create_namespace: true
+        values:
+          prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues: false
+          grafana.sidecar.dashboards.enabled: true
+          grafana.sidecar.dashboards.label: grafana_dashboard
+
+    - name: Deploy Kafka Exporter
+      kubernetes.core.helm:
+        name: kafka-exporter
+        chart_ref: prometheus-community/prometheus-kafka-exporter
+        version: "{{ kafka_exporter_version }}"
+        namespace: monitoring
         
-    - name: Configure Kafka exporter
+    - name: Import Grafana dashboards
       template:
-        src: templates/kafka_exporter.conf.j2
-        dest: /etc/prometheus/kafka_exporter.conf
-        
-    - name: Start Prometheus service
-      service:
-        name: prometheus
-        state: started
-        
-    - name: Install Grafana
-      apt:
+        src: ../../configs/grafana/dashboard.json
+        dest: /etc/grafana/provisioning/dashboards/kafka.json
+      notify: Restart Grafana
+
+  handlers:
+    - name: Restart Grafana
+      kubernetes.core.k8s:
+        kind: Deployment
         name: grafana
-        state: present
+        namespace: monitoring
+        state: restarted
 
