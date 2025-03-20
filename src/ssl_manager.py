@@ -32,6 +32,9 @@ class SSLCertManager:
         if self.config['lets_encrypt']['enabled']:
             logger.info("Skipping CA generation - Let's Encrypt enabled")
             return
+        if self.config.get('use_custom_ca', False):
+            logger.info("Using existing custom CA certificates")
+            return
 
         if os.path.exists(self.ca_cert_path) and os.path.exists(self.ca_key_path):
             logger.info("CA certificate already exists")
@@ -75,7 +78,7 @@ class SSLCertManager:
 
     def generate_node_certificate(self, hostnames):
         if self.config['lets_encrypt']['enabled']:
-            self._generate_lets_encrypt_certificate()
+            self._generate_lets_encrypt_certificate(hostnames)
         else:
             self._generate_self_signed_certificate(hostnames)
 
@@ -93,10 +96,13 @@ class SSLCertManager:
             critical=False,
         ).sign(key, hashes.SHA256(), default_backend())
 
-        with open(self.ca_key_path, "rb") as f:
-            ca_key = serialization.load_pem_private_key(f.read(), password=None)
-        with open(self.ca_cert_path, "rb") as f:
-            ca_cert = x509.load_pem_x509_certificate(f.read())
+        if os.path.exists(self.ca_key_path) and os.path.exists(self.ca_cert_path):
+            with open(self.ca_key_path, "rb") as f:
+                ca_key = serialization.load_pem_private_key(f.read(), password=None)
+            with open(self.ca_cert_path, "rb") as f:
+                ca_cert = x509.load_pem_x509_certificate(f.read())
+        else:
+            raise ValueError("CA certificate and key not found")
 
         cert = x509.CertificateBuilder().subject_name(
             csr.subject
@@ -135,7 +141,7 @@ class SSLCertManager:
             ))
         logger.info(f"Generated self-signed certificate for {hostnames}")
 
-    def _generate_lets_encrypt_certificate(self):
+    def _generate_lets_encrypt_certificate(self, hostnames):
         domains = self.config['lets_encrypt']['domains']
         if not domains:
             raise ValueError("Let's Encrypt requires domains configuration")
@@ -146,11 +152,19 @@ class SSLCertManager:
 
         certbot_cmd = [
             'certbot', 'certonly', '--non-interactive', '--agree-tos',
-            '--standalone',
             '--email', email,
-            '--cert-name', 'kafka-cert',
-            '-d', ','.join(domains)
+            '--cert-name', 'kafka-cert'
         ]
+
+        if self.config['lets_encrypt'].get('dns_provider'):
+            certbot_cmd.extend([
+                '--dns', self.config['lets_encrypt']['dns_provider'],
+                '--dns-propagation-seconds', str(self.config['lets_encrypt'].get('dns_propagation', 60))
+            ])
+            certbot_cmd.extend(['-d', ','.join(domains)])
+            os.environ.update(self.config['lets_encrypt'].get('dns_env', {}))
+        else:
+            certbot_cmd.extend(['--standalone', '-d', ','.join(domains)])
 
         if self.config['lets_encrypt']['staging']:
             certbot_cmd.append('--staging')
@@ -170,7 +184,7 @@ class SSLCertManager:
         os.chmod(self.node_key_path, 0o600)
         logger.info(f"Let's Encrypt certificates copied to {self.cert_dir}")
 
-    def validate_certificates(self):
+    def validate_certificates(self, expected_domains=None):
         if not os.path.exists(self.node_cert_path):
             raise FileNotFoundError("Node certificate missing")
         
@@ -181,13 +195,23 @@ class SSLCertManager:
             raise ValueError("Certificate has expired")
             
         if self.config['lets_encrypt']['enabled']:
-            if (cert.not_valid_after - datetime.utcnow()).days < 30:
-                logger.warning("Certificate expires in less than 30 days")
+            expiry_days = (cert.not_valid_after - datetime.utcnow()).days
+            if expiry_days < 30:
+                logger.warning(f"Certificate expires in {expiry_days} days")
                 raise ValueError("Certificate renewal required")
 
-    def renew_certificates(self):
-        if self.config['lets_encrypt']['enabled']:
-            self._generate_lets_encrypt_certificate()
-            self.validate_certificates()
-            logger.info("Certificate renewal completed successfully")
+        if expected_domains:
+            san = cert.extensions.get_extension_for_class(x509.SubjectAlternativeName)
+            cert_domains = san.value.get_values_for_type(x509.DNSName)
+            missing = set(expected_domains) - set(cert_domains)
+            if missing:
+                raise ValueError(f"Certificate missing domains: {missing}")
 
+    def renew_certificates(self, hostnames=None):
+        if self.config['lets_encrypt']['enabled']:
+            self._generate_lets_encrypt_certificate(hostnames or [])
+        else:
+            self.generate_ca()
+            self._generate_self_signed_certificate(hostnames or [])
+        self.validate_certificates(hostnames)
+        logger.info("Certificate renewal completed successfully")

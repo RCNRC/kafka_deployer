@@ -9,8 +9,14 @@ organization: "Kafka Deployment"
 organizational_unit: "Security"
 email: "security@example.com"
 
+use_custom_ca: false
+
 lets_encrypt:
   enabled: false
   email: ""
   staging: true
   domains: []
+  dns_provider: ""
+  dns_propagation: 60
+  dns_env: {}
+
