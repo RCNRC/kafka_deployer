@@ -1,27 +1,7 @@
-replicaCount: 3
-image:
-  repository: myrepo/kafka
-  tag: 3.2.0
-  pullPolicy: IfNotPresent
-configuration:
-  logRetentionHours: 168
-  numPartitions: 3
-resources:
-  limits:
-    memory: 2Gi
-  requests:
-    cpu: 500m
-    memory: 1Gi
-persistence:
+autoscaling:
   enabled: true
-  storageClass: standard
-  size: 10Gi
-service:
-  type: LoadBalancer
-  port: 9092
-zookeeper:
-  enabled: true
-  image: myrepo/zookeeper
-  tag: 3.7.1
-monitoring:
-  prometheus: true
+  minReplicas: 3
+  maxReplicas: 10
+  targetCPU: 80
+  targetThroughput: 1000000
+
