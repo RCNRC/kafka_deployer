@@ -1,53 +1,42 @@
 # Auto-scaling Implementation Guide
 
-## Configuration
-Enable auto-scaling in values.yaml:
+## Hybrid Scaling Configuration
 ```yaml
-autoscaling:
-  enabled: true
-  minReplicas: 3
-  maxReplicas: 10
-  targetCPU: 80
-  targetThroughput: 1000000
-```
-
-## Cloud Provider Setup
-
-### AWS
-```yaml
-aws:
-  auto_scaling_group: kafka-asg
-  region: us-east-1
-  scaling_policies:
-    cpu_threshold: 80
-    scale_out_step: 1
-    scale_in_threshold: 30
-    scale_in_step: 1
-    max_nodes: 10
+scaling:
+  strategy: hybrid
+  cloud:
     min_nodes: 3
+    max_nodes: 15  
+  kubernetes:
+    min_replicas: 5
+    max_replicas: 20
+  policies:
+    - type: cpu
+      threshold: 75
+      duration: 300
+    - type: throughput 
+      threshold: 1000000
+      step: 2
 ```
 
-### GCP
+## Multi-cloud Configuration
 ```yaml
-gcp:
-  instance_group: kafka-ig
-  zone: us-central1-a
-  scaling_policies:
-    throughput_threshold: 1000000
-    throughput_scale_step: 2
-    max_nodes: 15
-    min_nodes: 5
+scaling:
+  providers:
+    - aws:
+        region: us-east-1
+        weight: 60
+    - gcp:
+        region: us-central1  
+        weight: 40
+  strategy: cost-optimized
 ```
 
-## Monitoring Integration
-Scaling decisions are based on Prometheus metrics:
-- CPU Usage (container_cpu_usage_seconds_total)
-- Network Throughput (kafka_network_throughput_bytes)
-- Consumer Lag (kafka_consumer_lag_messages)
-
-## Custom Scaling Policies
-Override default policies via CLI:
-```bash
-python -m src.cli.cli set-policy --metric cpu --threshold 85 --step 2
+## Spot Instance Recovery
+```python
+def handle_spot_interruption():
+    if spot_preemption_warning():
+        migrate_partitions()
+        scale_out_ondemand(1)
 ```
 

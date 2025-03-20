@@ -2,23 +2,23 @@
 - name: Install monitoring stack
   hosts: kafka_cluster
   tasks:
-    - name: Install Prometheus
-      apt: 
-        name: prometheus
-        state: present
-        
-    - name: Configure Kafka exporter
+    - name: Collect hardware specs
+      shell: |
+        echo "cpu_cores=$(nproc)" > /tmp/hw_specs
+        echo "disk_type=$(lsblk -d -o rota | tail -1)" >> /tmp/hw_specs
+        echo "network_speed=$(ethtool eth0 | grep Speed | awk '{print $2}')" >> /tmp/hw_specs
+      register: hw_info
+
+    - name: Store hardware profile
       template:
-        src: templates/kafka_exporter.conf.j2
-        dest: /etc/prometheus/kafka_exporter.conf
-        
-    - name: Start Prometheus service
-      service:
-        name: prometheus
-        state: started
-        
-    - name: Install Grafana
+        src: templates/hw_profile.j2
+        dest: /etc/prometheus/hw_profile.yml
+
+    - name: Install NVMe tools
       apt:
-        name: grafana
+        name: nvme-cli
         state: present
+      when: "'NVME' in ansible_devices"
+
+    # Existing monitoring tasks below...
 
