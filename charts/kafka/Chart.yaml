@@ -1,0 +1,9 @@
+apiVersion: v2
+name: kafka
+version: 0.1.0
+appVersion: 3.2.0
+description: Apache Kafka Helm chart with Zookeeper
+dependencies:
+- name: zookeeper
+  version: 0.1.0
+  repository: file://../zookeeper
