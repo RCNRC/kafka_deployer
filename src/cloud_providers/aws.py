@@ -1,52 +1,84 @@
 import boto3
 from botocore.exceptions import ClientError
-from .base import CloudProvider, CloudError
+from .base import CloudProvider
 from typing import Dict, Any
+import logging
+
+logger = logging.getLogger('kafka_deployer.aws')
 
 class AWSCloudProvider(CloudProvider):
-    """AWS implementation using MSK and EC2"""
-    
-    REQUIRED_CONFIG = ['region', 'instance_type', 'ssh_key_name', 'auto_scaling']
-    
-    def configure_autoscaling(self, scaling_policy: Dict[str, Any]):
-        autoscaling = boto3.client('autoscaling', region_name=self.config['region'])
+    def __init__(self, config: Dict[str, Any]):
+        self.config = config
+        self.client = boto3.client('autoscaling', region_name=config['region'])
+        self.ec2_client = boto3.client('ec2', region_name=config['region'])
+        
+    def scale_out(self, count: int) -> None:
         try:
-            autoscaling.put_scaling_policy(
-                AutoScalingGroupName=self.config['auto_scaling_group'],
-                PolicyName='kafka-cpu-scaling',
-                PolicyType='TargetTrackingScaling',
-                TargetTrackingConfiguration={
-                    'PredefinedMetricSpecification': {
-                        'PredefinedMetricType': 'ASGAverageCPUUtilization'
-                    },
-                    'TargetValue': scaling_policy.get('cpu_threshold', 70.0)
-                }
+            asg_name = self.config['auto_scaling_group']
+            current = self.get_current_nodes()
+            new_capacity = min(current + count, self.config['max_nodes'])
+            
+            self.client.set_desired_capacity(
+                AutoScalingGroupName=asg_name,
+                DesiredCapacity=new_capacity,
+                HonorCooldown=True
             )
+            logger.info(f"Scaled out AWS ASG {asg_name} to {new_capacity}")
         except ClientError as e:
-            raise CloudError(3003, f"Auto-scaling configuration failed: {str(e)}")
+            logger.error(f"AWS scale out failed: {str(e)}")
+            raise
 
-    def scale_out(self, count: int):
-        asg = boto3.client('autoscaling', self.config['region'])
-        current = self.get_current_nodes()
-        new_capacity = min(current + count, self.config['auto_scaling']['max_nodes'])
-        asg.set_desired_capacity(
-            AutoScalingGroupName=self.config['auto_scaling_group'],
-            DesiredCapacity=new_capacity
-        )
-
-    def scale_in(self, count: int):
-        asg = boto3.client('autoscaling', self.config['region'])
-        current = self.get_current_nodes()
-        new_capacity = max(current - count, self.config['auto_scaling']['min_nodes'])
-        asg.set_desired_capacity(
-            AutoScalingGroupName=self.config['auto_scaling_group'],
-            DesiredCapacity=new_capacity
-        )
+    def scale_in(self, count: int) -> None:
+        try:
+            asg_name = self.config['auto_scaling_group']
+            current = self.get_current_nodes()
+            new_capacity = max(current - count, self.config['min_nodes'])
+            
+            self.client.set_desired_capacity(
+                AutoScalingGroupName=asg_name,
+                DesiredCapacity=new_capacity,
+                HonorCooldown=True
+            )
+            logger.info(f"Scaled in AWS ASG {asg_name} to {new_capacity}")
+        except ClientError as e:
+            logger.error(f"AWS scale in failed: {str(e)}")
+            raise
 
     def get_current_nodes(self) -> int:
-        asg = boto3.client('autoscaling', self.config['region'])
-        response = asg.describe_auto_scaling_groups(
-            AutoScalingGroupNames=[self.config['auto_scaling_group']]
+        asg_name = self.config['auto_scaling_group']
+        response = self.client.describe_auto_scaling_groups(
+            AutoScalingGroupNames=[asg_name]
         )
         return response['AutoScalingGroups'][0]['DesiredCapacity']
+
+    def get_pricing_data(self) -> Dict[str, float]:
+        try:
+            response = self.ec2_client.describe_spot_price_history(
+                InstanceTypes=[self.config['instance_type']],
+                ProductDescriptions=['Linux/UNIX'],
+                MaxResults=1
+            )
+            spot_price float float(response['SpotPriceHistory'][0]['SpotPrice'])
+            
+            return {
+                'on_demand': self.config.get('on_demand_price', 0.12),
+                'spot': spot_price,
+                'reserved': self.config.get('reserved_price', 0.08)
+            }
+        except ClientError as e:
+            logger.warning(f"Failed to get spot prices: {str(e)}")
+            return self.config.get('fallback_prices', {})
+
+    def get_instance_lifecycle(self) -> Dict[str, float]:
+        response = self.ec2_client.describe_instances(
+            Filters=[{'Name': 'instance-state-name', 'Values': ['running']}]
+        )
+        lifecycle = {'spot': 0, 'on_demand': 0}
+        for reservation in response['Reservations']:
+            for instance in reservation['Instances']:
+                if instance.get('InstanceLifecycle') == 'spot':
+                    lifecycle['spot'] += 1
+                else:
+                    lifecycle['on_demand'] += 1
+        return lifecycle
 

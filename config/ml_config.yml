@@ -1,0 +1,19 @@
+model_path: models/kafka_tuning_model.joblib
+training_data: data/training/kafka_metrics.csv
+n_estimators: 200
+features:
+  - cpu_usage
+  - memory_usage
+  - disk_io
+  - network_throughput
+  - cost_per_core
+  - disk_perf
+  - workload_type
+  - consumer_lag
+targets:
+  - io_threads
+  - flush_interval
+  - network_threads
+  - retention_hours
+retraining_interval: 604800  # 1 week in seconds
+

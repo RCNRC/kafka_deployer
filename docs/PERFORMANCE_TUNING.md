@@ -1,29 +1,54 @@
-# Performance Tuning Guide
+# Intelligent Performance Tuning
 
-## Auto-Optimization Rules
-1. When JVM memory usage exceeds 80%:
-   - Increase `num.io.threads`
-   - Reduce `log.flush.interval.messages`
-   
-2. When consumer lag > 1000 messages:
-   - Increase `num.partitions`
-   - Adjust `fetch.max.bytes`
+## Workload Pattern Detection system system automatically detects three types of workloads:
+1. **Streaming** - High network throughput, low latency requirements
+2. **Batch** - Large message sizes, high disk I/O
+3. **Hybrid** - Mixed characteristics
 
-## Monitoring Setup
-To enable performance monitoring:
-1. Install Prometheus and Grafana using:
-```bash
-ansible-playbook monitoring.yml
+Detection criteria:
+```python
+network_ratio = network_throughput / disk_io
+if network_ratio > 5 and request_rate > 1000: streaming
+elif batch_size > 10000 and consumer_lag < 100: batch
+else: hybrid
 ```
-2. Import dashboard template from `configs/grafana/`
 
-## Auto-Scaling Configuration
-Configure threshold values in cloud provider config:
+## ML-Based Configuration
+Random Forest model predicts optimal parameters:
+```python
+model = RandomForestRegressor(n_estimators=200)
+model.fit(training_data)
+```
+
+Key features:
+- Real-time CPU/Memory/Disk/Network metrics
+- Cloud instance capabilities
+- Workload type indicators
+- Current consumer lag
+
+## Cost-Aware Optimization
+Integrates cloud provider pricing data:
 ```yaml
 aws:
-  auto_scaling:
-    cpu_threshold: 80
-    scale_out_step: 1
-    scale_in_step: 1
+  cost_per_core: 0.12
+  disk_perf: 500  # IOPS
+gcp:
+  cost_per_core: 0.10
+  disk_perf: 750
+```
+
+## Configuration Versioning
+Track changes with rollback capability:
+```bash
+python -m src.cli.cli config-rollback --steps 2
+```
+
+## Retraining Pipeline
+Automatic weekly model retraining:
+```python
+def train_model():
+    X, y = load_training_data()
+    model.fit(X, y)
+    joblib.dump(model, 'models/kafka_tuning_model.joblib')
 ```
 
