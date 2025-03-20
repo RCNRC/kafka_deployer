@@ -1,38 +1,15 @@
-from google.cloud import compute_v1
-from .base import CloudProvider, CloudError
-from typing import Dict, Any
-
 class GCPCloudProvider(CloudProvider):
-    """GCP implementation using Compute Engine"""
-    
-    def scale_out(self, count: int):
-        client = compute_v1.InstanceGroupManagersClient()
-        current = self.get_current_nodes()
-        new_size = min(current + count, self.config['auto_scaling']['max_nodes'])
-        client.resize(
-            project=self.config['project_id'],
-            zone=self.config['zone'],
-            instance_group_manager=self.config['instance_group'],
-            size=new_size
-        )
+    def get_instance_cost(self, instance_type: str) -> float:
+        pricing = {
+            'n2-standard-2': 0.0971,
+            'n2-highmem-4': 0.1943
+        }
+        return pricing.get(instance_type, 0.0)
 
-    def scale_in(self, count: int):
-        client = compute_v1.InstanceGroupManagersClient()
-        current = self.get_current_nodes()
-        new_size = max(current - count, self.config['auto_scaling']['min_nodes'])
-        client.resize(
-            project=self.config['project_id'],
-            zone=self.config['zone'],
-            instance_group_manager=self.config['instance_group'],
-            size=new_size
-        )
-
-    def get_current_nodes(self) -> int:
-        client = compute_v1.InstanceGroupManagersClient()
-        ig = client.get(
-            project=self.config['project_id'],
-            zone=self.config['zone'],
-            instance_group_manager=self.config['instance_group']
-        )
-        return ig.target_size
+    def get_instance_specs(self, instance_type: str) -> Dict[str, Any]:
+        specs = {
+            'n2-standard-2': {'vcpu': 2, 'mem_gb': 8, 'network': '10 Gbps'},
+            'n2-highmem-4': {'vcpu': 4, 'mem_gb': 16, 'network': '10 Gbps'}
+        }
+        return specs.get(instance_type, {})
 
