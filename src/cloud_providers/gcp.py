@@ -1,20 +1,38 @@
-from google.cloud import pubsub
+from google.cloud import compute_v1
 from .base import CloudProvider, CloudError
+from typing import Dict, Any
 
 class GCPCloudProvider(CloudProvider):
-    """GCP implementation using Pub/Sub"""
+    """GCP implementation using Compute Engine"""
     
-    def _validate_config(self) -> None:
-        if 'project_id' not in self.config:
-            raise CloudError(3101, "Missing GCP project_id in config")
-    
-    def provision_infrastructure(self) -> Dict[str, str]:
-        try:
-            publisher = pubsub.PublisherClient()
-            topic_path = publisher.topic_path(self.config['project_id'], 'kafka-events')
-            publisher.create_topic(name=topic_path)
-            return {'topic': topic_path}
-        except Exception as e:
-            raise CloudError(3102, f"GCP provisioning failed: {str(e)}")
-    
-    # Other method implementations...
+    def scale_out(self, count: int):
+        client = compute_v1.InstanceGroupManagersClient()
+        current = self.get_current_nodes()
+        new_size = min(current + count, self.config['auto_scaling']['max_nodes'])
+        client.resize(
+            project=self.config['project_id'],
+            zone=self.config['zone'],
+            instance_group_manager=self.config['instance_group'],
+            size=new_size
+        )
+
+    def scale_in(self, count: int):
+        client = compute_v1.InstanceGroupManagersClient()
+        current = self.get_current_nodes()
+        new_size = max(current - count, self.config['auto_scaling']['min_nodes'])
+        client.resize(
+            project=self.config['project_id'],
+            zone=self.config['zone'],
+            instance_group_manager=self.config['instance_group'],
+            size=new_size
+        )
+
+    def get_current_nodes(self) -> int:
+        client = compute_v1.InstanceGroupManagersClient()
+        ig = client.get(
+            project=self.config['project_id'],
+            zone=self.config['zone'],
+            instance_group_manager=self.config['instance_group']
+        )
+        return ig.target_size
+
