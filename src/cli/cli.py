@@ -1,32 +1,29 @@
 import click
 from pathlib import Path
 from ..core import ConfigManager, AnsibleRunner
-
-@click.group()
-def cli():
-    """Kafka cluster deployment tool"""
-    pass
+from ..core.monitoring import MetricsCollector, AutoOptimizer
 
 @cli.command()
-@click.option("--config", required=True, help="Path to cluster config file")
-def deploy(config):
-    """Deploy Kafka cluster using configuration file"""
-    click.echo(f"Starting deployment with config: {config}")
+def status():
+    """Show cluster health status"""
+    collector = MetricsCollector()
+    click.echo("Cluster health metrics:")
+    click.echo(f"Memory Used: {collector.metrics['kafka_jvm_memory_used'].collect()[0].samples[0].value} MB")
+    click.echo(f"Consumer Lag: {collector.metrics['consumer_lag'].collect()[0].samples[0].value} messages")
+
+@cli.command()
+@click.option('--threshold', default=80, help='CPU usage threshold for optimization')
+def optimize(threshold):
+    """Automatically optimize cluster configuration"""
+    collector = MetricsCollector()
+    optimizer = AutoOptimizer()
+    optimizations = optimizer.optimize_configuration(collector.get_current_metrics())
     
-    # Load configuration
-    cm = ConfigManager()
-    config_data = cm.load_config(config)
-    
-    # Generate inventory
-    inventory = cm.generate_inventory(config_data["nodes"])
-    with open("inventory.ini", "w") as f:
-        f.write(inventory)
-    
-    # Run Ansible playbooks
-    ansible = AnsibleRunner()
-    success = ansible.run_playbook("kafka_deploy.yml")
-    
-    if success:
-        click.secho("Deployment completed successfully!", fg="green")
+    if optimizations:
+        click.echo("Applying optimizations:")
+        for key, value in optimizations.items():
+            click.echo(f"{key} = {value}")
+        # Apply config changes through Ansible
     else:
-        click.secho("Deployment failed!", fg="red")
+        click.echo("No optimizations required at this time")
+

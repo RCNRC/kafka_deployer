@@ -7,29 +7,27 @@ class AWSCloudProvider(CloudProvider):
     
     REQUIRED_CONFIG = ['region', 'instance_type', 'ssh_key_name']
     
-    def _validate_config(self) -> None:
-        missing = [key for key in self.REQUIRED_CONFIG if key not in self.config]
-        if missing:
-            raise CloudError(3001, f"Missing AWS config keys: {', '.join(missing)}")
-            
-    def provision_infrastructure(self) -> Dict[str, str]:
-        ec2 = boto3.client('ec2', region_name=self.config['region'])
+    def configure_autoscaling(self, scaling_policy: Dict[str, Any]):
+        autoscaling = boto3.client('autoscaling', region_name=self.config['region'])
         try:
-            response = ec2.run_instances(
-                InstanceType=self.config['instance_type'],
-                KeyName=self.config['ssh_key_name'],
-                # ... other params
+            autoscaling.put_scaling_policy(
+                AutoScalingGroupName=self.config['auto_scaling_group'],
+                PolicyName='kafka-cpu-scaling',
+                PolicyType='TargetTrackingScaling',
+                TargetTrackingConfiguration={
+                    'PredefinedMetricSpecification': {
+                        'PredefinedMetricType': 'ASGAverageCPUUtilization'
+                    },
+                    'TargetValue': 70.0
+                }
             )
-            return {
-                'public_ip': response['Instances'][0]['PublicIpAddress'],
-                'instance_id': response['Instances'][0]['InstanceId']
-            }
         except ClientError as e:
-            raise CloudError(3002, f"AWS provisioning failed: {str(e)}")
-    
-    def configure_kafka_cluster(self) -> None:
-        msk = boto3.client('kafka', region_name=self.config['region'])
-        # MSK cluster creation logic
-    
-    def cleanup_resources(self) -> None:
-        # Implementation to terminate instances and clean resources
+            raise CloudError(3003, f"Auto-scaling configuration failed: {str(e)}")
+
+    def handle_scaling_event(self, metrics: Dict[str, float]):
+        current_nodes = len(self.get_active_nodes())
+        if metrics['cpu_usage'] > 80:
+            self.scale_out(1)
+        elif metrics['cpu_usage'] < 30 and current_nodes > 3:
+            self.scale_in(1)
+
