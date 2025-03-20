@@ -3,6 +3,7 @@ from botocore.exceptions import ClientError
 from .base import CloudProvider
 from typing import Dict, Any
 import logging
+from datetime import datetime, timedelta
 
 logger = logging.getLogger('kafka_deployer.aws')
 
@@ -11,74 +12,99 @@ class AWSCloudProvider(CloudProvider):
         self.config = config
         self.client = boto3.client('autoscaling', region_name=config['region'])
         self.ec2_client = boto3.client('ec2', region_name=config['region'])
+        self.price_cache = {'timestamp': None, 'data': None}
         
-    def scale_out(self, count: int) -> None:
+    def scale_out(self, count: int, spot: bool = False) -> None:
         try:
-            asg_name = self.config['auto_scaling_group']
-            current = self.get_current_nodes()
-            new_capacity = min(current + count, self.config['max_nodes'])
-            
-            self.client.set_desired_capacity(
-                AutoScalingGroupName=asg_name,
-                DesiredCapacity=new_capacity,
-                HonorCooldown=True
-            )
-            logger.info(f"Scaled out AWS ASG {asg_name} to {new_capacity}")
+            if spot and self.config.get('spot_enabled', False):
+                self._scale_out_spot(count)
+            else:
+                self._scale_out_ondemand(count)
         except ClientError as e:
             logger.error(f"AWS scale out failed: {str(e)}")
             raise
 
-    def scale_in(self, count: int) -> None:
-        try:
-            asg_name = self.config['auto_scaling_group']
-            current = self.get_current_nodes()
-            new_capacity = max(current - count, self.config['min_nodes'])
-            
-            self.client.set_desired_capacity(
-                AutoScalingGroupName=asg_name,
-                DesiredCapacity=new_capacity,
-                HonorCooldown=True
-            )
-            logger.info(f"Scaled in AWS ASG {asg_name} to {new_capacity}")
-        except ClientError as e:
-            logger.error(f"AWS scale in failed: {str(e)}")
-            raise
-
-    def get_current_nodes(self) -> int:
+    def _scale_out_ondemand(self, count: int):
         asg_name = self.config['auto_scaling_group']
-        response = self.client.describe_auto_scaling_groups(
-            AutoScalingGroupNames=[asg_name]
+        current = self.get_current_nodes()
+        new_capacity = min(current + count, self.config['max_nodes'])
+        
+        self.client.set_desired_capacity(
+            AutoScalingGroupName=asg_name,
+            DesiredCapacity=new_capacity,
+            HonorCooldown=True
         )
-        return response['AutoScalingGroups'][0]['DesiredCapacity']
+
+    def _scale_out_spot(self, count: int):
+        spot_config = {
+            'LaunchTemplate': {
+                'LaunchTemplateName': self.config['spot_template'],
+                'Version': '$Latest'
+            },
+            'InstanceRequirements': {
+                'VCpuCount': {'Min': 2},
+                'MemoryMiB': {'Min': 4096}
+            }
+        }
+        
+        response = self.client.batch_create_instances(
+            InstanceType='mixed',
+            SpotPercentage=100,
+            LaunchTemplateConfigs=[spot_config],
+            MinCount=count,
+            MaxCount=count
+        )
+        logger.info(f"Launched {count} spot instances")
+
+    def handle_spot_interruptions(self):
+        try:
+            events = self.ec2_client.describe_spot_instance_requests(
+                Filters=[{'Name': 'state', 'Values': ['marked-for-termination']}]
+            )
+            if events['SpotInstanceRequests']:
+                logger.warning(f"Spot interruption detected, replacing {len(events)} instances")
+                self.scale_out(len(events), spot=True)
+                self._terminate_instances([i['InstanceId'] for i in events])
+        except ClientError as e:
+            logger.error(f"Spot interruption handling failed: {str(e)}")
 
     def get_pricing_data(self) -> Dict[str, float]:
-        try:
-            response = self.ec2_client.describe_spot_price_history(
-                InstanceTypes=[self.config['instance_type']],
-                ProductDescriptions=['Linux/UNIX'],
-                MaxResults=1
-            )
-            spot_price float float(response['SpotPriceHistory'][0]['SpotPrice'])
+        if self.price_cache['timestamp'] and \
+           (datetime.now() - self.price_cache['timestamp']) < timedelta(minutes=15):
+            return self.price_cache['data']
             
-            return {
-                'on_demand': self.config.get('on_demand_price', 0.12),
-                'spot': spot_price,
-                'reserved': self.config.get('reserved_price', 0.08)
+        try:
+            pricing = boto3.client('pricing', region_name='us-east-1')
+            response = pricing.get_products(
+                ServiceCode='AmazonEC2',
+                Filters=[
+                    {'Type': 'TERM_MATCH', 'Field': 'instanceType', 'Value': self.config['instance_type']},
+                    {'Type': 'TERM_MATCH', 'Field': 'operatingSystem', 'Value': 'Linux'}
+                ]
+            )
+            price_list = response['PriceList'][0]
+            self.price_cache = {
+                'timestamp': datetime.now(),
+                'data': {
+                    'on_demand': float(price_list['terms']['OnDemand'].values()[0]['priceDimensions'].values()[0]['pricePerUnit']['USD']),
+                    'spot': self._get_spot_price(),
+                    'reserved': float(price_list['terms']['Reserved'].values()[0]['priceDimensions'].values()[0]['pricePerUnit']['USD'])
+                }
             }
-        except ClientError as e:
-            logger.warning(f"Failed to get spot prices: {str(e)}")
+            return self.price_cache['data']
+        except Exception as e:
+            logger.warning(f"Failed to get pricing data: {str(e)}")
             return self.config.get('fallback_prices', {})
 
-    def get_instance_lifecycle(self) -> Dict[str, float]:
-        response = self.ec2_client.describe_instances(
-            Filters=[{'Name': 'instance-state-name', 'Values': ['running']}]
+    def _get_spot_price(self) -> float:
+        response = self.ec2_client.describe_spot_price_history(
+            InstanceTypes=[self.config['instance_type']],
+            ProductDescriptions=['Linux/UNIX'],
+            MaxResults=1
         )
-        lifecycle = {'spot': 0, 'on_demand': 0}
-        for reservation in response['Reservations']:
-            for instance in reservation['Instances']:
-                if instance.get('InstanceLifecycle') == 'spot':
-                    lifecycle['spot'] += 1
-                else:
-                    lifecycle['on_demand'] += 1
-        return lifecycle
+        return float(response['SpotPriceHistory'][0]['SpotPrice'])
+
+    def _terminate_instances(self, instance_ids: list):
+        self.ec2_client.terminate_instances(InstanceIds=instance_ids)
+        logger.info(f"Terminated instances: {instance_ids}")
 

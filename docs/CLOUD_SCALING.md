@@ -1,61 +1,59 @@
 # Cloud Native Auto-scaling Integration
 
-## Supported Providers
-- AWS Auto Scaling Groups
-- Google Cloud Managed Instance Groups  
-- Azure Virtual Machine Scale Sets
-- Kubernetes Horizontal Pod Autoscaler
-
-## Configuration Examples
-
-### AWS Auto Scaling
+## Spot Instance Management
 ```yaml
-aws:
-  region: us-east-1
-  auto_scaling_group: kafka-asg
-  instance_type: m5.large
-  scaling:
-    min_nodes: 3
-    max_nodes: 15
-    cpu_threshold: 75
-    scale_out_step: 2
-    spot_ratio: 0.8
-  pricing:
-    on_demand: 0.12
-    spot: 0.04
-    reserved: 0.08
+scaling:
+  spot:
+    enabled: true
+    max_price: 0.25  # Max bid price as percentage of on-demand
+    replacement_timeout: 300  # Seconds to replace interrupted instances
+    fallback: true  # Use on-demand if spot unavailable
 ```
 
-### Azure VM Scale Sets
-```yaml
-azure:
-  subscription_id: "your-sub-id"
-  resource_group: kafka-rg  
-  scale_set_name: kafka-ss
-  vm_sku: Standard_D2s_v3
-  scaling:
-    min_nodes: 5
-    max_nodes: 20
-    throughput_threshold: 500000
-```
-
-## Spot Instance Handling
-1. Configure spot instance ratio (0-1)
-2. Automatic instance replacement
-3. Preemption monitoring
-4. Fallback to on-demand instances
-
-## Pricing Integration
+## Multi-cloud Cost Optimization
 ```python
-# Get cost-aware scaling recommendations
-pricing = cloud_provider.get_pricing_data()
-if pricing['spot'] < 0.5 * pricing['on_demand']:
-    prefer_spot_instances()
+# Select cheapest provider for scaling
+prices = {
+    'aws': aws_provider.get_pricing_data(),
+    'gcp': gcp_provider.get_pricing_data()
+}
+cheapest = min(prices, key=lambda k: prices[k]['spot'])
+cloud_provider = providers[cheapest]
 ```
 
-## Monitoring Integration
-Track scaling events in Prometheus:
-- kafka_scaling_events_total
-- kafka_instance_spot_ratio
-- kafka_scaling_cost_impact
+## Monitoring Metrics
+- `kafka_scaling_events_total`
+- `kafka_spot_instance_ratio`
+- `kafka_scaling_cost_impact`
+
+## Spot Interruption Handling
+```python
+# AWS example using instance metadata service
+def check_spot_interruption():
+    try:
+        response = requests.get(
+            'http://169.254.169.254/latest/meta-data/spot/instance-action',
+            timeout=2
+        )
+        if response.status_code == 200:
+            return True
+    except requests.exceptions.RequestException:
+        return False
+```
+
+## Hybrid Scaling Example
+```yaml
+scaling:
+  strategy: hybrid
+  rules:
+    - metric: cpu
+      threshold: 75
+      duration: 300
+      action: add:2
+      priority: 100
+    - metric: cost
+      threshold: 0.50
+      action: replace_spot
+      priority: 200
+```
 
