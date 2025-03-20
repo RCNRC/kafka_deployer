@@ -3,12 +3,18 @@ import logging
 import subprocess
 from src.error_handler import handle_error
 from src.cloud_integration import cleanup_cloud_resources
+from src.ssl_manager import SSLCertManager  # New import
 
 logging.config.fileConfig('config/logging.conf')
 logger = logging.getLogger('kafka_deployer')
 
 def run_preflight_checks():
     try:
+        # SSL Certificate Management
+        ssl_mgr = SSLCertManager()
+        ssl_mgr.generate_ca()
+        ssl_mgr.generate_node_certificate(['localhost'])  # TODO: Get actual hostnames
+        
         result = subprocess.run(
             ["scripts/preflight_checks.sh"],
             check=True,
