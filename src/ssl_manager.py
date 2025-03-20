@@ -1,13 +1,14 @@
 import os
 import subprocess
+import shutil
 from datetime import datetime, timedelta
+import logging
 import yaml
 from cryptography import x509
 from cryptography.x509.oid import NameOID
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.backends import default_backend
-import logging
 
 logger = logging.getLogger('kafka_deployer.ssl')
 
@@ -28,6 +29,10 @@ class SSLCertManager:
             return yaml.safe_load(f)
 
     def generate_ca(self):
+        if self.config['lets_encrypt']['enabled']:
+            logger.info("Skipping CA generation - Let's Encrypt enabled")
+            return
+
         if os.path.exists(self.ca_cert_path) and os.path.exists(self.ca_key_path):
             logger.info("CA certificate already exists")
             return
@@ -66,13 +71,15 @@ class SSLCertManager:
                 format=serialization.PrivateFormat.TraditionalOpenSSL,
                 encryption_algorithm=serialization.NoEncryption(),
             ))
-        
         logger.info("Generated new CA certificate")
 
     def generate_node_certificate(self, hostnames):
-        if not os.path.exists(self.ca_cert_path):
-            raise FileNotFoundError("CA certificate not found")
+        if self.config['lets_encrypt']['enabled']:
+            self._generate_lets_encrypt_certificate()
+        else:
+            self._generate_self_signed_certificate(hostnames)
 
+    def _generate_self_signed_certificate(self, hostnames):
         key = rsa.generate_private_key(
             public_exponent=65537,
             key_size=2048,
@@ -126,13 +133,61 @@ class SSLCertManager:
                 format=serialization.PrivateFormat.TraditionalOpenSSL,
                 encryption_algorithm=serialization.NoEncryption(),
             ))
+        logger.info(f"Generated self-signed certificate for {hostnames}")
 
-        logger.info(f"Generated node certificate for {hostnames}")
+    def _generate_lets_encrypt_certificate(self):
+        domains = self.config['lets_encrypt']['domains']
+        if not domains:
+            raise ValueError("Let's Encrypt requires domains configuration")
+
+        email = self.config['lets_encrypt']['email']
+        if not email:
+            raise ValueError("Let's Encrypt requires email configuration")
+
+        certbot_cmd = [
+            'certbot', 'certonly', '--non-interactive', '--agree-tos',
+            '--standalone',
+            '--email', email,
+            '--cert-name', 'kafka-cert',
+            '-d', ','.join(domains)
+        ]
+
+        if self.config['lets_encrypt']['staging']:
+            certbot_cmd.append('--staging')
+
+        try:
+            subprocess.run(certbot_cmd, check=True, capture_output=True)
+            logger.info("Let's Encrypt certificate generated successfully")
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Let's Encrypt failed: {e.stderr.decode()}")
+            raise RuntimeError("Let's Encrypt certificate generation failed")
+
+        le_cert_path = f'/etc/letsencrypt/live/kafka-cert/fullchain.pem'
+        le_key_path = f'/etc/letsencrypt/live/kafka-cert/privkey.pem'
+        
+        shutil.copy(le_cert_path, self.node_cert_path)
+        shutil.copy(le_key_path, self.node_key_path)
+        os.chmod(self.node_key_path, 0o600)
+        logger.info(f"Let's Encrypt certificates copied to {self.cert_dir}")
 
     def validate_certificates(self):
-        # Implementation for certificate validation
-        pass
+        if not os.path.exists(self.node_cert_path):
+            raise FileNotFoundError("Node certificate missing")
+        
+        with open(self.node_cert_path, 'rb') as f:
+            cert = x509.load_pem_x509_certificate(f.read())
+            
+        if datetime.utcnow() > cert.not_valid_after:
+            raise ValueError("Certificate has expired")
+            
+        if self.config['lets_encrypt']['enabled']:
+            if (cert.not_valid_after - datetime.utcnow()).days < 30:
+                logger.warning("Certificate expires in less than 30 days")
+                raise ValueError("Certificate renewal required")
 
-    def lets_encrypt_integration(self):
-        # Implementation for Let's Encrypt
-        pass
+    def renew_certificates(self):
+        if self.config['lets_encrypt']['enabled']:
+            self._generate_lets_encrypt_certificate()
+            self.validate_certificates()
+            logger.info("Certificate renewal completed successfully")
+
