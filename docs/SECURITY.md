@@ -1,25 +1,40 @@
-## Automatic Certificate Renewal
+## Automated Certificate Management
 
-The system performs daily checks and automatically renews certificates when:
-- Certificates expire in less than 30 days (configurable via `renewal_threshold_days`)
-- Certificate chain validation fails
-- New nodes are added to the cluster
-
-Integration with monitoring systems:
+### Renewal Configuration
 ```yaml
-alerting:
-  ssl_expiry:
-    enabled: true
-    warning_days: 30
-    critical_days: 7
+ssl:
+  renewal_threshold_days: 20  # Alert when certs have <=20 days validity
+  cloud_providers:
+    aws:
+      use_acm: true
+      domain: "*.kafka.example.com"
+    gcp:
+      managed_certs: true
+      certificate_name: "kafka-prod-cert"
 ```
 
-Cloud-managed certificates:
-```yaml
-aws:
-  use_acm: true
-  acm_arn: "arn:aws:acm:..."
-gcp:
-  managed_certs: true
-  certificate_name: "kafka-cluster-cert"
+### Audit Logging
+All certificate operations are logged with:
+- Timestamp
+- Operation type
+- Status (success/failure)
+- Error details (if any)
+
+View audit logs via CLI:
+```bash
+kafka-deployer certs audit-log
 ```
+
+### Monitoring Integration
+Certificates are monitored through:
+- Prometheus metric `kafka_ssl_cert_expiry_days`
+- Grafana dashboard with expiration alerts
+- Kubernetes events for CSR approvals
+
+### Certificate Rotation Process
+1. Generate new certificates
+2. Distribute using Ansible playbook
+3. Rolling restart of brokers
+4. Verify consumer group offsets
+5. Revoke old certificates
+

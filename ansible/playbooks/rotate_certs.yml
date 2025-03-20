@@ -1,0 +1,25 @@
+---
+- name: Rotate SSL certificates
+  hosts: kafka_cluster
+  serial: 1
+  tasks:
+    - name: Transfer new certificates
+      copy:
+        src: "{{ cert_src }}"
+        dest: /etc/kafka/ssl/
+        mode: 0600
+        
+    - name: Reload Kafka service
+      systemd:
+        name: kafka
+        state: reloaded
+        
+    - name: Verify connection
+      wait_for:
+        port: 9093
+        delay: 10
+        timeout: 60
+        
+    - name: Expire old sessions
+      command: kafka-streams-application-reset --bootstrap-servers localhost:9092 --application-id myapp
+
