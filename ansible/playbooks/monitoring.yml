@@ -1,0 +1,24 @@
+---
+- name: Install monitoring stack
+  hosts: kafka_cluster
+  tasks:
+    - name: Install Prometheus
+      apt: 
+        name: prometheus
+        state: present
+        
+    - name: Configure Kafka exporter
+      template:
+        src: templates/kafka_exporter.conf.j2
+        dest: /etc/prometheus/kafka_exporter.conf
+        
+    - name: Start Prometheus service
+      service:
+        name: prometheus
+        state: started
+        
+    - name: Install Grafana
+      apt:
+        name: grafana
+        state: present
+
