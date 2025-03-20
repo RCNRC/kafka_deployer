@@ -1,18 +1,13 @@
 cluster_name: "test-cluster"
 kafka_version: 3.2.0
 zookeeper_version: 3.7.1
-nodes:
-  - ip: 192.168.1.10
-    user: admin
-    role: broker
-  - ip: 192.168.1.11
-    user: admin
-    role: zookeeper
-  - ip: 192.168.1.12
-    user: admin
-    role: both
+monitoring:
+  enabled: true
+  prometheus_exporters:
+    jmx: true
+    node: true
+  alert_rules:
+    cpu_alert_threshold: 90
+    disk_alert_threshold: 85
+    consumer_lag_threshold: 10000
 
-tuning_params:
-  num_partitions: 3
-  replication_factor: 2
-  log_retention_hours: 168

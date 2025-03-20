@@ -1,24 +1,27 @@
----
-- name: Install monitoring stack
-  hosts: kafka_cluster
-  tasks:
-    - name: Install Prometheus
-      apt: 
-        name: prometheus
-        state: present
-        
-    - name: Configure Kafka exporter
-      template:
-        src: templates/kafka_exporter.conf.j2
-        dest: /etc/prometheus/kafka_exporter.conf
-        
-    - name: Start Prometheus service
-      service:
-        name: prometheus
-        state: started
-        
-    - name: Install Grafana
-      apt:
-        name: grafana
-        state: present
+- name: Configure AlertManager
+  helm:
+    name: prometheus
+    chart_name: prometheus-community/kube-prometheus-stack
+    namespace: monitoring
+    values:
+      alertmanager:
+        config:
+          global:
+            resolve_timeout: 5m
+          route:
+            group_by: ['alertname']
+            receiver: 'default'
+          receivers:
+          - name: 'default'
+            email_configs:
+            - to: 'alerts@example.com'
+              send_resolved: true
+      prometheus:
+        prometheusSpec:
+          ruleSelectorNilUsesHelmValues: false
+
+- name: Apply Kafka alert rules
+  k8s:
+    state: present
+    definition: "{{ lookup('file', '../../charts/kafka/templates/prometheusrules.yaml') | from_yaml }}"
 

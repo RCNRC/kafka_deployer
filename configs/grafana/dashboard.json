@@ -2,20 +2,29 @@
   "title": "Kafka Cluster Monitoring",
   "panels": [
     {
-      "title": "SSL Certificate Expiry",
-      "type": "gauge",
+      "title": "JVM Memory Usage",
+      "type": "graph",
       "targets": [{
-        "expr": "kafka_ssl_cert_expiry_days",
-        "legendFormat": "Days Remaining"
-      }],
-      "thresholds": {
-        "steps": [
-          {"value": 0, "color": "red"},
-          {"value": 30, "color": "yellow"},
-          {"value": 60, "color": "green"}
-        ]
-      }
+        "expr": "sum(jvm_memory_bytes_used{area=\"heap\"}) by (pod)",
+        "legendFormat": "{{pod}}"
+      }]
     },
-    // Existing panels...
+    {
+      "title": "Consumer Lag",
+      "type": "graph",
+      "targets": [{
+        "expr": "kafka_consumer_lag",
+        "legendFormat": "{{consumer_group}}"
+      }]
+    },
+    {
+      "title": "Network Throughput",
+      "type": "graph",
+      "targets": [
+        {"expr": "rate(kafka_server_socket_server_metrics_bytes_sent[5m])", "legendFormat": "Out"},
+        {"expr": "rate(kafka_server_socket_server_metrics_bytes_received[5m])", "legendFormat": "In"}
+      ]
+    }
   ]
 }
+
