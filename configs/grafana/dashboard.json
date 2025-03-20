@@ -1,0 +1,16 @@
+{
+  "title": "Kafka Cluster Monitoring",
+  "panels": [
+    {
+      "title": "JVM Memory Usage",
+      "type": "graph",
+      "targets": [{"expr": "kafka_jvm_memory_used_bytes"}]
+    },
+    {
+      "title": "Consumer Lag",
+      "type": "singlestat",
+      "targets": [{"expr": "kafka_consumer_lag_messages"}]
+    }
+  ]
+}
+
