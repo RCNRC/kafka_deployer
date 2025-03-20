@@ -1,37 +1,6 @@
-# Automated Monitoring System
+## Cloud Provider Integration
 
-## Deployment
-Enable monitoring in values.yaml:
-```yaml
-monitoring:
-  enabled: true
-  grafana:
-    admin_password: "securepass"
-  prometheus:
-    retention: 15d
-  alerts:
-    enabled: true
-```
-
-Deploy with monitoring:
-```bash
-helm install kafka-cluster charts/kafka --set monitoring.enabled=true
-```
-
-## Features
-- Pre-configured dashboards for:
-  - JVM Metrics
-  - Consumer Lag
-  - Topic Throughput
-  - Disk Utilization
-- Automatic alerting for:
-  - Under-replicated Partitions
-  - Offline Partitions
-  - High Consumer Lag
-  - Broker Down
-
-## Cloud Integration
-AWS CloudWatch metrics:
+### AWS CloudWatch
 ```yaml
 monitoring:
   cloudwatch:
@@ -42,11 +11,30 @@ monitoring:
       - AWS/EC2
 ```
 
-GCP Stackdriver integration:
+### GCP Stackdriver
 ```yaml
 monitoring:
   stackdriver:
     enabled: true
     project_id: my-project
+    metrics:
+      - kafka.googleapis.com/topic/byte_rate
+      - kafka.googleapis.com/consumer_lag
+```
+
+## Alert Management
+Pre-configured alerts include:
+- Under-replicated partitions
+- Offline partitions
+- High consumer lag (>10k messages)
+- Broker down
+- Disk space critical
+
+Customize thresholds:
+```yaml
+monitoring:
+  alerts:
+    consumer_lag_threshold: 5000
+    disk_alert_percent: 90
 ```
 

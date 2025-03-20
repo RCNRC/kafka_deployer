@@ -1,41 +1,27 @@
----
-- name: Deploy monitoring stack
-  hosts: kafka_cluster
-  vars:
-    prometheus_version: "2.47.0"
-    grafana_version: "9.5.6"
-    kafka_exporter_version: "1.7.0"
-    
-  tasks:
-    - name: Install Prometheus Operator
-      helm:
-        name: prometheus
-        chart_name: prometheus-community/kube-prometheus-stack
-        namespace: monitoring
-        create_namespace: true
-        values:
-          prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues: false
-          grafana.sidecar.dashboards.enabled: true
-          grafana.sidecar.dashboards.label: grafana_dashboard
+- name: Configure AlertManager
+  helm:
+    name: prometheus
+    chart_name: prometheus-community/kube-prometheus-stack
+    namespace: monitoring
+    values:
+      alertmanager:
+        config:
+          global:
+            resolve_timeout: 5m
+          route:
+            group_by: ['alertname']
+            receiver: 'default'
+          receivers:
+          - name: 'default'
+            email_configs:
+            - to: 'alerts@example.com'
+              send_resolved: true
+      prometheus:
+        prometheusSpec:
+          ruleSelectorNilUsesHelmValues: false
 
-    - name: Deploy Kafka Exporter
-      kubernetes.core.helm:
-        name: kafka-exporter
-        chart_ref: prometheus-community/prometheus-kafka-exporter
-        version: "{{ kafka_exporter_version }}"
-        namespace: monitoring
-        
-    - name: Import Grafana dashboards
-      template:
-        src: ../../configs/grafana/dashboard.json
-        dest: /etc/grafana/provisioning/dashboards/kafka.json
-      notify: Restart Grafana
-
-  handlers:
-    - name: Restart Grafana
-      kubernetes.core.k8s:
-        kind: Deployment
-        name: grafana
-        namespace: monitoring
-        state: restarted
+- name: Apply Kafka alert rules
+  k8s:
+    state: present
+    definition: "{{ lookup('file', '../../charts/kafka/templates/prometheusrules.yaml') | from_yaml }}"
 

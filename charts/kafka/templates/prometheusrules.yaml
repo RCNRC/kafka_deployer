@@ -1,0 +1,30 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ .Chart.Name }}-alerts
+  labels:
+    app: {{ .Chart.Name }}
+    release: prometheus
+spec:
+  groups:
+  - name: kafka-alerts
+    rules:
+    - alert: UnderReplicatedPartitions
+      expr: kafka_server_replicacount < 1
+      for: 5m
+      annotations:
+        description: 'Partition {{ $labels.topic }} has {{ $value }} replicas'
+        summary: Kafka under-replicated partitions detected
+        
+    - alert: OfflinePartitions
+      expr: kafka_controller_offline_partitions_count > 0
+      annotations:
+        description: '{{ $value }} partitions offline'
+        severity: critical
+        
+    - alert: HighConsumerLag
+      expr: kafka_consumer_lag > {{ .Values.monitoring.alerts.consumer_lag_threshold | default 10000 }}
+      for: 15m
+      annotations:
+        description: 'Consumer group {{ $labels.consumer_group }} has lag of {{ $value }} messages'
+
